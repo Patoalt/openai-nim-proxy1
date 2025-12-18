@@ -261,4 +261,138 @@ app.post('/v1/chat/completions', async (req, res) => {
     if (!nimModel) {
       const modelLower = model.toLowerCase();
       if (modelLower.includes('gpt-4') || modelLower.includes('405b')) {
-        nimModel = 'met
+        nimModel = 'meta/llama-3.1-405b-instruct';
+      } else if (modelLower.includes('70b')) {
+        nimModel = 'meta/llama-3.1-70b-instruct';
+      } else {
+        nimModel = 'meta/llama-3.1-8b-instruct';
+      }
+    }
+    
+    // Process plugins
+    const pluginInjections = processPlugins(messages);
+    
+    // Inject plugin messages
+    const modifiedMessages = injectMessages(messages, pluginInjections);
+    
+    // Make request to NVIDIA NIM
+    const nimRequest = {
+      model: nimModel,
+      messages: modifiedMessages,
+      temperature: temperature || 0.7,
+      max_tokens: max_tokens || 1024,
+      stream: stream || false
+    };
+    
+    const response = await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
+      headers: {
+        'Authorization': `Bearer ${NIM_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      responseType: stream ? 'stream' : 'json'
+    });
+    
+    if (stream) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      response.data.pipe(res);
+    } else {
+      const openaiResponse = {
+        id: `chatcmpl-${Date.now()}`,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: model,
+        choices: response.data.choices,
+        usage: response.data.usage || {
+          prompt_tokens: 0,
+          completion_tokens: 0,
+          total_tokens: 0
+        }
+      };
+      res.json(openaiResponse);
+    }
+    
+  } catch (error) {
+    console.error('Proxy error:', error.message);
+    res.status(error.response?.status || 500).json({
+      error: {
+        message: error.message || 'Internal server error',
+        type: 'invalid_request_error',
+        code: error.response?.status || 500
+      }
+    });
+  }
+});
+
+// ============================================
+// PLUGIN MANAGEMENT ENDPOINTS
+// ============================================
+
+// List all plugins
+app.get('/plugins', (req, res) => {
+  res.json({
+    plugins: plugins.map(p => ({
+      name: p.name,
+      enabled: p.enabled,
+      entries: Object.keys(p.entries).length
+    })),
+    message_count: messageCount,
+    variables: pluginVariables,
+    switches: pluginSwitches
+  });
+});
+
+// Enable/disable plugin
+app.post('/plugins/:name/toggle', (req, res) => {
+  const plugin = plugins.find(p => p.name === req.params.name);
+  if (!plugin) {
+    return res.status(404).json({ error: 'Plugin not found' });
+  }
+  plugin.enabled = !plugin.enabled;
+  res.json({ name: plugin.name, enabled: plugin.enabled });
+});
+
+// Reset message count
+app.post('/reset-count', (req, res) => {
+  messageCount = 0;
+  res.json({ message_count: messageCount });
+});
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok',
+    service: 'Advanced Plugin System + NVIDIA NIM Proxy',
+    plugins: plugins.length,
+    active_plugins: plugins.filter(p => p.enabled).length,
+    message_count: messageCount
+  });
+});
+
+// Models endpoint
+app.get('/v1/models', (req, res) => {
+  const models = Object.keys(MODEL_MAPPING).map(model => ({
+    id: model,
+    object: 'model',
+    created: Date.now(),
+    owned_by: 'plugin-enhanced-proxy'
+  }));
+  res.json({ object: 'list', data: models });
+});
+
+// ============================================
+// LOAD PLUGINS FROM JSON FILES
+// ============================================
+// NOTE: In production, you would load these from files or database
+// For now, they need to be manually added here
+
+console.log('🔧 Server initialized. Add your plugin JSONs to activate them.');
+console.log('📝 Use the /plugins endpoint to manage loaded plugins.');
+
+app.listen(PORT, () => {
+  console.log(`🚀 Advanced Plugin System running on port ${PORT}`);
+  console.log(`📦 Loaded plugins: ${plugins.length}`);
+  console.log(`✅ Active plugins: ${plugins.filter(p => p.enabled).length}/${plugins.length}`);
+  console.log(`📊 Message count: ${messageCount}`);
+});
