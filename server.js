@@ -245,19 +245,3 @@ app.listen(PORT, () => {
   console.log(`Thinking mode: ${ENABLE_THINKING_MODE ? 'ENABLED' : 'DISABLED'}`);
 });
 ```
-
-5. **Commit changes**: `Revert to simple proxy without plugins`
-
----
-
-### PASSO 3: Esperar deploy (2 minutos)
-
-Render vai fazer deploy automático.
-
----
-
-### PASSO 4: Testar
-
-Abre no navegador:
-```
-https://openai-nim-proxy1.onrender.com/health
