@@ -382,13 +382,10 @@ app.get('/v1/models', (req, res) => {
 });
 
 // ============================================
-// LOAD PLUGINS FROM JSON FILES
+// LOAD PLUGINS
 // ============================================
-// NOTE: In production, you would load these from files or database
-// For now, they need to be manually added here
-
-console.log('🔧 Server initialized. Add your plugin JSONs to activate them.');
-console.log('📝 Use the /plugins endpoint to manage loaded plugins.');
+const { loadAllPlugins } = require('./plugins-data');
+loadAllPlugins(plugins);
 
 app.listen(PORT, () => {
   console.log(`🚀 Advanced Plugin System running on port ${PORT}`);
