@@ -8,7 +8,8 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // NVIDIA NIM API configuration
 const NIM_API_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
@@ -31,6 +32,23 @@ const MODEL_MAPPING = {
   'claude-3-5-sonnet': 'moonshotai/kimi-k2-thinking',
   'gemini-pro': 'qwen/qwen3-next-80b-a3b-thinking' 
 };
+
+// 🔧 SMART MESSAGE TRUNCATION - Prevents 413 errors
+function truncateMessages(messages, maxMessages = 20) {
+  if (!messages || messages.length <= maxMessages) {
+    return messages;
+  }
+  
+  // Always keep system message if present
+  const systemMsg = messages.find(m => m.role === 'system');
+  const otherMessages = messages.filter(m => m.role !== 'system');
+  
+  // Keep most recent messages
+  const recentMessages = otherMessages.slice(-maxMessages);
+  
+  // Return system message + recent messages
+  return systemMsg ? [systemMsg, ...recentMessages] : recentMessages;
+}
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -95,7 +113,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     // Transform OpenAI request to NIM format
     const nimRequest = {
       model: nimModel,
-      messages: messages,
+      messages: truncateMessages(messages), // Smart truncation to prevent 413 errors
       temperature: temperature || 0.6,
       max_tokens: max_tokens || 9024,
       extra_body: ENABLE_THINKING_MODE ? { chat_template_kwargs: { thinking: true } } : undefined,
