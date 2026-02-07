@@ -19,36 +19,19 @@ const NIM_API_KEY = process.env.NIM_API_KEY;
 const SHOW_REASONING = false; // Set to true to show reasoning with <think> tags
 
 // 🔥 THINKING MODE TOGGLE - Enables thinking for specific models that support it
-const ENABLE_THINKING_MODE = true; // Set to true to enable chat_template_kwargs thinking parameter
+const ENABLE_THINKING_MODE = false; // Set to true to enable chat_template_kwargs thinking parameter
 
 // Model mapping (adjust based on available NIM models)
 const MODEL_MAPPING = {
-  'gpt-3.5-turbo': 'moonshotai/kimi-k2.5',
+  'gpt-3.5-turbo': 'nvidia/llama-3.1-nemotron-ultra-253b-v1',
   'gpt-4': 'deepseek-ai/deepseek-r1-0528',
   'gpt-4-turbo': 'deepseek-ai/deepseek-v3.1-terminus',
   'gpt-4o': 'deepseek-ai/deepseek-v3.1',
-  'claude-3-opus': 'z-ai/glm4.7',
+  'claude-3-opus': 'openai/gpt-oss-120b',
   'claude-3-sonnet': 'deepseek-ai/deepseek-v3.2',
   'claude-3-5-sonnet': 'moonshotai/kimi-k2-thinking',
-  'gemini-pro': 'qwen/qwen3-next-80b-a3b-thinking'
+  'gemini-pro': 'qwen/qwen3-next-80b-a3b-thinking' 
 };
-
-// 🔧 SMART MESSAGE TRUNCATION - Prevents 413 errors
-function truncateMessages(messages, maxMessages = 20) {
-  if (!messages || messages.length <= maxMessages) {
-    return messages;
-  }
-  
-  // Always keep system message if present
-  const systemMsg = messages.find(m => m.role === 'system');
-  const otherMessages = messages.filter(m => m.role !== 'system');
-  
-  // Keep most recent messages
-  const recentMessages = otherMessages.slice(-maxMessages);
-  
-  // Return system message + recent messages
-  return systemMsg ? [systemMsg, ...recentMessages] : recentMessages;
-}
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -113,7 +96,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     // Transform OpenAI request to NIM format
     const nimRequest = {
       model: nimModel,
-      messages: truncateMessages(messages), // Smart truncation to prevent 413 errors
+      messages: messages,
       temperature: temperature || 0.6,
       max_tokens: max_tokens || 9024,
       extra_body: ENABLE_THINKING_MODE ? { chat_template_kwargs: { thinking: true } } : undefined,
