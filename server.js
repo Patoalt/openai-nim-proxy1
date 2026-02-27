@@ -19,7 +19,7 @@ const NIM_API_KEY = process.env.NIM_API_KEY;
 const SHOW_REASONING = false;
 
 // THINKING MODE TOGGLE
-const ENABLE_THINKING_MODE = true;
+const ENABLE_THINKING_MODE = false;
 
 // Model mapping
 const MODEL_MAPPING = {
