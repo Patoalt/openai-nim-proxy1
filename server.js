@@ -25,15 +25,16 @@ const SHOW_REASONING = false;
 const ENABLE_THINKING_MODE = false; // DESATIVADO para teste de estabilidade
 
 const MODEL_MAPPING = {
-  'gpt-3.5-turbo': 'moonshotai/kimi-k2.5',
-  'gpt-4': 'deepseek-ai/deepseek-r1-0528',
-  'gpt-4-turbo': 'deepseek-ai/deepseek-v3.1-terminus',
-  'gpt-4o': 'deepseek-ai/deepseek-v3.1',
-  'gpt-4o-mini': 'z-ai/glm5-9b-instruct',
-  'claude-3-opus': 'z-ai/glm4.7',
-  'claude-3-sonnet': 'deepseek-ai/deepseek-v3.2',
-  'claude-3-5-sonnet': 'moonshotai/kimi-k2-thinking',
-  'gemini-pro': 'qwen/qwen3-next-80b-a3b-thinking'
+  'gpt-3.5-turbo': 'moonshotai/kimi-k2.5'
+'gpt-4': 'deepseek-ai/deepseek-r1-0528'
+'gpt-4-turbo': 'deepseek-ai/deepseek-v3.1-terminus'
+'gpt-4o': 'deepseek-ai/deepseek-v3.1'
+'gpt-4o-mini': 'z-ai/glm5-9b-instruct'
+'o1-mini': 'z-ai/glm-5.1'
+'claude-3-opus': 'z-ai/glm4.7'
+'claude-3-sonnet': 'deepseek-ai/deepseek-v3.2'
+'claude-3-5-sonnet': 'moonshotai/kimi-k2-thinking'
+'gemini-pro': 'qwen/qwen3-next-80b-a3b-thinking'
 };
 
 // Rotas de Health Check (Múltiplos caminhos para evitar 404)
