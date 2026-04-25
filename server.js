@@ -1,4 +1,15 @@
-// server.js - OpenAI to NVIDIA NIM API Proxy
+// Model mapping
+const MODEL_MAPPING = {
+  'gpt-3.5-turbo': 'deepseek-ai/deepseek-v3.2',
+  'gpt-4': 'deepseek-ai/deepseek-r1-0528',
+  'gpt-4-turbo': 'nvidia/llama-3.1-nemotron-ultra-253b-v1',
+  'gpt-4o': 'deepseek-ai/deepseek-v3.2',
+  'gpt-4o-mini': 'z-ai/glm-4.7',
+  'o1-mini': 'z-ai/glm-5.1',
+  'claude-3-opus': 'nvidia/llama-3.1-nemotron-ultra-253b-v1',
+  'claude-3-sonnet': 'deepseek-ai/deepseek-v3.2',
+  'claude-3-5-sonnet': 'moonshotai/kimi-k2-thinking',
+  'gemini-pro': 'qwen/qwen3-next-80b-a3b// server.js - OpenAI to NVIDIA NIM API Proxy
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -23,15 +34,15 @@ const ENABLE_THINKING_MODE = true;
 
 // Model mapping
 const MODEL_MAPPING = {
-  'gpt-3.5-turbo': 'moonshotai/kimi-k2.5'
-  'gpt-4': 'deepseek-ai/deepseek-r1-0528'
-  'gpt-4-turbo': 'deepseek-ai/deepseek-v3.1-terminus'
-  'gpt-4o': 'deepseek-ai/deepseek-v4-pro'
-  'gpt-4o-mini': 'z-ai/glm-4.7'
-  'o1-mini': 'z-ai/glm-5.1'
-  'claude-3-opus': 'nvidia/llama-3.1-nemotron-ultra-253b-v1'
-  'claude-3-sonnet': 'deepseek-ai/deepseek-v3.2'
-  'claude-3-5-sonnet': 'moonshotai/kimi-k2-thinking'
+  'gpt-3.5-turbo': 'moonshotai/kimi-k2.5',
+  'gpt-4': 'deepseek-ai/deepseek-r1-0528',
+  'gpt-4-turbo': 'deepseek-ai/deepseek-v3.1-terminus',
+  'gpt-4o': 'deepseek-ai/deepseek-v4-pro',
+  'gpt-4o-mini': 'z-ai/glm-4.7',
+  'o1-mini': 'z-ai/glm-5.1',
+  'claude-3-opus': 'nvidia/llama-3.1-nemotron-ultra-253b-v1',
+  'claude-3-sonnet': 'deepseek-ai/deepseek-v3.2',
+  'claude-3-5-sonnet': 'moonshotai/kimi-k2-thinking',
   'gemini-pro': 'qwen/qwen3-next-80b-a3b-thinking'
 };
 
@@ -103,7 +114,10 @@ app.post('/v1/chat/completions', async (req, res) => {
     const nimRequest = {
       model: nimModel,
       messages: messages,
-      temperature: temperature || 0.6,
+      temperature: temperature || 0.7,
+      top_p: 0.9,
+      top_k: 50,
+      repetition_penalty: 1.1,
       max_tokens: max_tokens || 9024,
       extra_body: ENABLE_THINKING_MODE ? { chat_template_kwargs: { thinking: true } } : undefined,
       stream: stream || false
