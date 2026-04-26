@@ -1,15 +1,4 @@
-// Model mapping
-const MODEL_MAPPING = {
-  'gpt-3.5-turbo': 'deepseek-ai/deepseek-v3.2',
-  'gpt-4': 'deepseek-ai/deepseek-r1-0528',
-  'gpt-4-turbo': 'nvidia/llama-3.1-nemotron-ultra-253b-v1',
-  'gpt-4o': 'deepseek-ai/deepseek-v4-pro',
-  'gpt-4o-mini': 'z-ai/glm-4.7',
-  'o1-mini': 'z-ai/glm-5.1',
-  'claude-3-opus': 'nvidia/llama-3.1-nemotron-ultra-253b-v1',
-  'claude-3-sonnet': 'deepseek-ai/deepseek-v3.2',
-  'claude-3-5-sonnet': 'moonshotai/kimi-k2-thinking',
-  'gemini-pro': 'qwen/qwen3-next-80b-a3b// server.js - OpenAI to NVIDIA NIM API Proxy
+// server.js - OpenAI to NVIDIA NIM API Proxy
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
