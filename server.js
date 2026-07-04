@@ -1,3 +1,4 @@
+// server.js - OpenAI to NVIDIA NIM API Proxy (versão com diagnóstico real)
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -7,13 +8,18 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const NIM_API_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
 const NIM_API_KEY = process.env.NIM_API_KEY;
 
-// REMOVEU THINKING POR PADRÃO (causa comum de 400)
-const ENABLE_THINKING_MODE = false;
+// Só ative thinking mode para modelos que sabidamente suportam (kimi-k2-thinking, deepseek-r1, qwen3-thinking, glm-5.1)
+const THINKING_CAPABLE_MODELS = new Set([
+  'moonshotai/kimi-k2-thinking',
+  'deepseek-ai/deepseek-r1-0528',
+  'qwen/qwen3-next-80b-a3b-thinking',
+  'z-ai/glm-5.1'
+]);
 
 const MODEL_MAPPING = {
   'gpt-3.5-turbo': 'moonshotai/kimi-k2.5',
@@ -28,94 +34,105 @@ const MODEL_MAPPING = {
   'gemini-pro': 'qwen/qwen3-next-80b-a3b-thinking'
 };
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 app.get('/v1/models', (req, res) => {
   res.json({
     object: 'list',
-    data: Object.keys(MODEL_MAPPING).map(m => ({
-      id: m,
-      object: 'model'
-    }))
+    data: Object.keys(MODEL_MAPPING).map(m => ({ id: m, object: 'model', created: Date.now(), owned_by: 'nvidia-nim-proxy' }))
   });
 });
 
-app.post('/v1/chat/completions', async (req, res) => {
-  try {
-    console.log("=== REQUEST ===");
-    console.log("Model:", req.body.model);
-
-    let { model, messages, temperature, max_tokens, stream } = req.body;
-
-    if (!messages || !Array.isArray(messages)) {
-      return res.status(400).json({
-        error: { message: "messages inválido ou ausente" }
-      });
-    }
-
-    let nimModel = MODEL_MAPPING[model] || model;
-
-    // 🔥 LIMPA MENSAGENS (evita 400 silencioso)
-    messages = messages.map(m => ({
+// Remove mensagens vazias e funde roles consecutivos iguais (evita 400 em alguns modelos)
+function sanitizeMessages(messages) {
+  const cleaned = messages
+    .map(m => ({
       role: m.role,
-      content: typeof m.content === 'string' ? m.content : String(m.content || "")
-    }));
+      content: typeof m.content === 'string' ? m.content : String(m.content ?? '')
+    }))
+    .filter(m => m.content.trim().length > 0);
 
-    const nimRequest = {
-      model: nimModel,
-      messages,
-      temperature: temperature ?? 0.7,
-      top_p: 0.9,
-      max_tokens: max_tokens ?? 2048
-      // ❌ removido top_k, repetition_penalty e extra_body
-    };
+  const merged = [];
+  for (const m of cleaned) {
+    const last = merged[merged.length - 1];
+    if (last && last.role === m.role) {
+      last.content += '\n' + m.content;
+    } else {
+      merged.push({ ...m });
+    }
+  }
+  return merged;
+}
 
-    const response = await axios.post(
-      `${NIM_API_BASE}/chat/completions`,
-      nimRequest,
-      {
-        headers: {
-          Authorization: `Bearer ${NIM_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        responseType: stream ? 'stream' : 'json'
-      }
-    );
+app.post('/v1/chat/completions', async (req, res) => {
+  const { model, temperature, max_tokens, stream } = req.body;
+  let { messages } = req.body;
+
+  console.log('=== REQUEST ===', { model, msgCount: messages?.length });
+
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return res.status(400).json({ error: { message: 'messages inválido ou vazio' } });
+  }
+
+  const nimModel = MODEL_MAPPING[model] || model;
+  messages = sanitizeMessages(messages);
+
+  const nimRequest = {
+    model: nimModel,
+    messages,
+    temperature: temperature ?? 0.7,
+    top_p: 0.9,
+    max_tokens: max_tokens ?? 2048,
+    stream: stream || false
+  };
+
+  if (THINKING_CAPABLE_MODELS.has(nimModel)) {
+    nimRequest.chat_template_kwargs = { thinking: true };
+  }
+
+  try {
+    const response = await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
+      headers: { Authorization: `Bearer ${NIM_API_KEY}`, 'Content-Type': 'application/json' },
+      responseType: stream ? 'stream' : 'json',
+      timeout: 60000 // 60s — sem isso, uma requisição travada fica pendurada pra sempre e nada é logado
+    });
 
     if (stream) {
       res.setHeader('Content-Type', 'text/event-stream');
-
-      response.data.on('data', chunk => {
-        res.write(chunk);
-      });
-
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      response.data.on('data', chunk => res.write(chunk));
       response.data.on('end', () => res.end());
+      response.data.on('error', err => { console.error('Stream error:', err); res.end(); });
       return;
     }
 
     res.json(response.data);
-
   } catch (error) {
-    console.error("===== NVIDIA ERROR REAL =====");
-    console.error("Status:", error.response?.status);
-    console.error("Data:", JSON.stringify(error.response?.data, null, 2));
-    console.error("============================");
+    // *** Aqui está o pulo do gato: log e retorno do erro REAL da NVIDIA ***
+    console.error('===== NVIDIA ERROR REAL =====');
+    console.error('Status:', error.response?.status);
+    console.error('Data:', JSON.stringify(error.response?.data, null, 2));
+    console.error('Modelo usado:', nimModel);
+    console.error('==============================');
 
     res.status(error.response?.status || 500).json({
-      error: error.response?.data || {
-        message: error.message,
-        type: "proxy_error"
+      error: {
+        message: error.response?.data?.message
+          || error.response?.data?.error?.message
+          || error.message,
+        type: 'invalid_request_error',
+        upstream: error.response?.data || null,
+        model_used: nimModel
       }
     });
   }
 });
 
 app.all('*', (req, res) => {
-  res.status(404).json({ error: "not found" });
+  res.status(404).json({ error: { message: `Endpoint ${req.path} not found`, type: 'invalid_request_error', code: 404 } });
 });
 
 app.listen(PORT, () => {
-  console.log("Proxy running on port", PORT);
+  console.log('Proxy rodando na porta', PORT);
 });
