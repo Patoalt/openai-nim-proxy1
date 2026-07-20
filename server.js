@@ -75,18 +75,7 @@ app.post('/v1/chat/completions', async (req, res) => {
   }
 
   const nimModel = MODEL_MAPPING[model] || model;
-
-  // LOG TEMPORÁRIO — remover depois de confirmar o lorebook
-  console.log('--- MENSAGENS RECEBIDAS (antes do sanitize) ---');
-  console.log(JSON.stringify(messages, null, 2));
-
   messages = sanitizeMessages(messages);
-
-  const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
-  console.log(`Tamanho total do prompt: ~${totalChars} caracteres (~${Math.round(totalChars / 4)} tokens estimados)`);
-
-  console.log('--- MENSAGENS ENVIADAS PRA NVIDIA (depois do sanitize) ---');
-  console.log(JSON.stringify(messages, null, 2));
 
   const nimRequest = {
     model: nimModel,
@@ -104,8 +93,7 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const response = await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
       headers: { Authorization: `Bearer ${NIM_API_KEY}`, 'Content-Type': 'application/json' },
-      responseType: stream ? 'stream' : 'json',
-      timeout: 120000 // 120s — prompts grandes (lorebook) + thinking mode podem demorar mais
+      responseType: stream ? 'stream' : 'json'
     });
 
     if (stream) {
@@ -124,8 +112,6 @@ app.post('/v1/chat/completions', async (req, res) => {
     console.error('===== NVIDIA ERROR REAL =====');
     console.error('Status:', error.response?.status);
     console.error('Data:', JSON.stringify(error.response?.data, null, 2));
-    console.error('Error code:', error.code);
-    console.error('Error message:', error.message);
     console.error('Modelo usado:', nimModel);
     console.error('==============================');
 
@@ -143,12 +129,6 @@ app.post('/v1/chat/completions', async (req, res) => {
 });
 
 app.all('*', (req, res) => {
-  console.log('=== 404 / ROTA DESCONHECIDA ===');
-  console.log('Method:', req.method);
-  console.log('Path:', req.path);
-  console.log('Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('Body:', JSON.stringify(req.body, null, 2));
-
   res.status(404).json({ error: { message: `Endpoint ${req.path} not found`, type: 'invalid_request_error', code: 404 } });
 });
 
