@@ -31,7 +31,9 @@ const MODEL_MAPPING = {
   'claude-3-opus': 'nvidia/llama-3.1-nemotron-ultra-253b-v1',
   'claude-3-sonnet': 'deepseek-ai/deepseek-v3.2',
   'claude-3-5-sonnet': 'moonshotai/kimi-k2-thinking',
-  'gemini-pro': 'qwen/qwen3-next-80b-a3b-thinking'
+  'gemini-pro': 'qwen/qwen3-next-80b-a3b-thinking',
+  'kimi-k2.6': 'moonshotai/kimi-k2.6',
+  'glm-5.2': 'z-ai/glm-5.2'
 };
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
@@ -75,7 +77,18 @@ app.post('/v1/chat/completions', async (req, res) => {
   }
 
   const nimModel = MODEL_MAPPING[model] || model;
+
+  // LOG TEMPORÁRIO — remover depois de confirmar o lorebook
+  console.log('--- MENSAGENS RECEBIDAS (antes do sanitize) ---');
+  console.log(JSON.stringify(messages, null, 2));
+
   messages = sanitizeMessages(messages);
+
+  const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+  console.log(`Tamanho total do prompt: ~${totalChars} caracteres (~${Math.round(totalChars / 4)} tokens estimados)`);
+
+  console.log('--- MENSAGENS ENVIADAS PRA NVIDIA (depois do sanitize) ---');
+  console.log(JSON.stringify(messages, null, 2));
 
   const nimRequest = {
     model: nimModel,
@@ -93,7 +106,8 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const response = await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
       headers: { Authorization: `Bearer ${NIM_API_KEY}`, 'Content-Type': 'application/json' },
-      responseType: stream ? 'stream' : 'json'
+      responseType: stream ? 'stream' : 'json',
+      timeout: 120000 // 120s — prompts grandes (lorebook) + thinking mode podem demorar mais
     });
 
     if (stream) {
@@ -107,11 +121,37 @@ app.post('/v1/chat/completions', async (req, res) => {
     }
 
     res.json(response.data);
+
+    console.log('--- RESULTADO DA GERAÇÃO ---');
+    console.log('finish_reason:', response.data.choices?.[0]?.finish_reason);
+    console.log('usage:', JSON.stringify(response.data.usage));
   } catch (error) {
     // *** Aqui está o pulo do gato: log e retorno do erro REAL da NVIDIA ***
+    // Se a resposta de erro veio como stream (porque a requisição original pedia stream),
+    // error.response.data é um Readable, não um objeto JSON — precisa ler o stream pra pegar o corpo real.
+    let upstreamErrorBody = null;
+    if (error.response?.data && typeof error.response.data.on === 'function') {
+      try {
+        upstreamErrorBody = await new Promise((resolve) => {
+          let raw = '';
+          error.response.data.on('data', chunk => raw += chunk.toString());
+          error.response.data.on('end', () => {
+            try { resolve(JSON.parse(raw)); } catch { resolve(raw); }
+          });
+          error.response.data.on('error', () => resolve(null));
+        });
+      } catch {
+        upstreamErrorBody = null;
+      }
+    } else {
+      upstreamErrorBody = error.response?.data ?? null;
+    }
+
     console.error('===== NVIDIA ERROR REAL =====');
     console.error('Status:', error.response?.status);
-    console.error('Data:', JSON.stringify(error.response?.data, null, 2));
+    console.error('Data:', (() => { try { return JSON.stringify(upstreamErrorBody, null, 2); } catch { return '[não serializável]'; } })());
+    console.error('Error code:', error.code);
+    console.error('Error message:', error.message);
     console.error('Modelo usado:', nimModel);
     console.error('==============================');
 
@@ -121,7 +161,7 @@ app.post('/v1/chat/completions', async (req, res) => {
           || error.response?.data?.error?.message
           || error.message,
         type: 'invalid_request_error',
-        upstream: error.response?.data || null,
+        upstream: upstreamErrorBody,
         model_used: nimModel
       }
     });
@@ -129,6 +169,12 @@ app.post('/v1/chat/completions', async (req, res) => {
 });
 
 app.all('*', (req, res) => {
+  console.log('=== 404 / ROTA DESCONHECIDA ===');
+  console.log('Method:', req.method);
+  console.log('Path:', req.path);
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('Body:', JSON.stringify(req.body, null, 2));
+
   res.status(404).json({ error: { message: `Endpoint ${req.path} not found`, type: 'invalid_request_error', code: 404 } });
 });
 
