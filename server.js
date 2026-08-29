@@ -88,11 +88,16 @@ app.post('/v1/chat/completions', async (req, res) => {
   console.log('--- MENSAGENS ENVIADAS PRA NVIDIA (depois do sanitize) ---');
   console.log(JSON.stringify(messages, null, 2));
 
+  // Alguns modelos exigem valores fixos/imutáveis de top_p — exceções aqui
+  const TOP_P_OVERRIDES = {
+    'moonshotai/kimi-k3': 0.95
+  };
+
   const nimRequest = {
     model: nimModel,
     messages,
     temperature: temperature ?? 0.7,
-    top_p: 0.9,
+    top_p: TOP_P_OVERRIDES[nimModel] ?? 0.9,
     max_tokens: max_tokens ?? 2048,
     stream: stream || false
   };
