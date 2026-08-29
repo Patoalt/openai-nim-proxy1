@@ -104,7 +104,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     const response = await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
       headers: { Authorization: `Bearer ${NIM_API_KEY}`, 'Content-Type': 'application/json' },
       responseType: stream ? 'stream' : 'json',
-      timeout: 120000 // 120s — prompts grandes (lorebook) + thinking mode podem demorar mais
+      timeout: 180000 // 180s — deepseek-v4-pro-0813 é um modelo de raciocínio pesado, precisa de mais fôlego
     });
 
     if (stream) {
