@@ -24,13 +24,14 @@ const MODEL_MAPPING = {
   'gpt-3.5-turbo': 'moonshotai/kimi-k2.5',
   'gpt-4': 'deepseek-ai/deepseek-r1-0528',
   'gpt-4-turbo': 'deepseek-ai/deepseek-v3.1-terminus',
-  'gpt-4o': 'deepseek-ai/deepseek-v4-pro-0813',
+  'gpt-4o': 'deepseek-ai/deepseek-v3.2',
   'gpt-4o-mini': 'z-ai/glm-4.7',
   'o1-mini': 'z-ai/glm-4.7',
   'claude-3-opus': 'nvidia/llama-3.1-nemotron-ultra-253b-v1',
   'claude-3-sonnet': 'deepseek-ai/deepseek-v3.2',
   'claude-3-5-sonnet': 'moonshotai/kimi-k2-thinking',
-  'gemini-pro': 'qwen/qwen3-next-80b-a3b-thinking'
+  'gemini-pro': 'qwen/qwen3-next-80b-a3b-thinking',
+  'kimi-k3': 'moonshotai/kimi-k3'
 };
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
@@ -104,7 +105,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     const response = await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
       headers: { Authorization: `Bearer ${NIM_API_KEY}`, 'Content-Type': 'application/json' },
       responseType: stream ? 'stream' : 'json',
-      timeout: 180000 // 180s — deepseek-v4-pro-0813 é um modelo de raciocínio pesado, precisa de mais fôlego
+      timeout: 90000 // 90s — equilíbrio entre dar tempo pro modelo e não travar a experiência do usuário
     });
 
     if (stream) {
