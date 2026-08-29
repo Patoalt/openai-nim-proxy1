@@ -93,82 +93,122 @@ app.post('/v1/chat/completions', async (req, res) => {
     'moonshotai/kimi-k3': 0.95
   };
 
-  const nimRequest = {
-    model: nimModel,
-    messages,
-    temperature: temperature ?? 0.7,
-    top_p: TOP_P_OVERRIDES[nimModel] ?? 0.9,
-    max_tokens: max_tokens ?? 2048,
-    stream: stream || false
-  };
+  // Cadeia de fallback: se o modelo pedido falhar (429, 404, 410, 500, timeout...),
+  // tenta os próximos da lista, na ordem, antes de desistir.
+  const FALLBACK_CHAIN = [
+    'moonshotai/kimi-k2.6',
+    'deepseek-ai/deepseek-v4-pro',
+    'deepseek-ai/deepseek-v3.2',
+    'z-ai/glm-4.7'
+  ];
 
-  if (THINKING_CAPABLE_MODELS.has(nimModel)) {
-    nimRequest.chat_template_kwargs = { thinking: true };
-  }
+  // Monta a lista de tentativas: primeiro o modelo pedido, depois os fallbacks (sem repetir)
+  const candidates = [nimModel, ...FALLBACK_CHAIN.filter(m => m !== nimModel)];
 
-  try {
-    const response = await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
-      headers: { Authorization: `Bearer ${NIM_API_KEY}`, 'Content-Type': 'application/json' },
-      responseType: stream ? 'stream' : 'json',
-      timeout: 90000 // 90s — equilíbrio entre dar tempo pro modelo e não travar a experiência do usuário
-    });
+  let lastError = null;
+  let lastUpstreamErrorBody = null;
 
-    if (stream) {
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      response.data.on('data', chunk => res.write(chunk));
-      response.data.on('end', () => res.end());
-      response.data.on('error', err => { console.error('Stream error:', err); res.end(); });
-      return;
+  for (let i = 0; i < candidates.length; i++) {
+    const candidateModel = candidates[i];
+
+    const nimRequest = {
+      model: candidateModel,
+      messages,
+      temperature: temperature ?? 0.7,
+      top_p: TOP_P_OVERRIDES[candidateModel] ?? 0.9,
+      max_tokens: max_tokens ?? 2048,
+      stream: stream || false
+    };
+
+    if (THINKING_CAPABLE_MODELS.has(candidateModel)) {
+      nimRequest.chat_template_kwargs = { thinking: true };
     }
 
-    res.json(response.data);
+    try {
+      console.log(`--- Tentativa ${i + 1}/${candidates.length}: ${candidateModel} ---`);
 
-    console.log('--- RESULTADO DA GERAÇÃO ---');
-    console.log('finish_reason:', response.data.choices?.[0]?.finish_reason);
-    console.log('usage:', JSON.stringify(response.data.usage));
-  } catch (error) {
-    // *** Aqui está o pulo do gato: log e retorno do erro REAL da NVIDIA ***
-    // Se a resposta de erro veio como stream (porque a requisição original pedia stream),
-    // error.response.data é um Readable, não um objeto JSON — precisa ler o stream pra pegar o corpo real.
-    let upstreamErrorBody = null;
-    if (error.response?.data && typeof error.response.data.on === 'function') {
-      try {
-        upstreamErrorBody = await new Promise((resolve) => {
-          let raw = '';
-          error.response.data.on('data', chunk => raw += chunk.toString());
-          error.response.data.on('end', () => {
-            try { resolve(JSON.parse(raw)); } catch { resolve(raw); }
+      const response = await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
+        headers: { Authorization: `Bearer ${NIM_API_KEY}`, 'Content-Type': 'application/json' },
+        responseType: stream ? 'stream' : 'json',
+        timeout: 90000
+      });
+
+      if (candidateModel !== nimModel) {
+        console.log(`✅ Fallback funcionou: usando ${candidateModel} no lugar de ${nimModel}`);
+
+        // Carimba a resposta com o nome do modelo real, só quando é um fallback
+        // (assim você sabe, direto no Janitor, que não foi o modelo que você pediu)
+        if (!stream && response.data.choices?.[0]?.message?.content) {
+          const shortName = candidateModel.split('/')[1] || candidateModel;
+          response.data.choices[0].message.content =
+            `[fallback: ${shortName}]\n\n` + response.data.choices[0].message.content;
+        }
+      }
+
+      if (stream) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        response.data.on('data', chunk => res.write(chunk));
+        response.data.on('end', () => res.end());
+        response.data.on('error', err => { console.error('Stream error:', err); res.end(); });
+        return;
+      }
+
+      res.json(response.data);
+
+      console.log('--- RESULTADO DA GERAÇÃO ---');
+      console.log('Modelo final usado:', candidateModel);
+      console.log('finish_reason:', response.data.choices?.[0]?.finish_reason);
+      console.log('usage:', JSON.stringify(response.data.usage));
+      return; // sucesso — encerra, não tenta mais nada
+
+    } catch (error) {
+      let upstreamErrorBody = null;
+      if (error.response?.data && typeof error.response.data.on === 'function') {
+        try {
+          upstreamErrorBody = await new Promise((resolve) => {
+            let raw = '';
+            error.response.data.on('data', chunk => raw += chunk.toString());
+            error.response.data.on('end', () => {
+              try { resolve(JSON.parse(raw)); } catch { resolve(raw); }
+            });
+            error.response.data.on('error', () => resolve(null));
           });
-          error.response.data.on('error', () => resolve(null));
-        });
-      } catch {
-        upstreamErrorBody = null;
+        } catch {
+          upstreamErrorBody = null;
+        }
+      } else {
+        upstreamErrorBody = error.response?.data ?? null;
       }
-    } else {
-      upstreamErrorBody = error.response?.data ?? null;
+
+      console.error('===== NVIDIA ERROR REAL =====');
+      console.error('Status:', error.response?.status);
+      console.error('Data:', (() => { try { return JSON.stringify(upstreamErrorBody, null, 2); } catch { return '[não serializável]'; } })());
+      console.error('Error code:', error.code);
+      console.error('Error message:', error.message);
+      console.error('Modelo usado:', candidateModel);
+      console.error('==============================');
+
+      lastError = error;
+      lastUpstreamErrorBody = upstreamErrorBody;
+
+      // Continua pro próximo candidato da lista (se houver)
     }
-
-    console.error('===== NVIDIA ERROR REAL =====');
-    console.error('Status:', error.response?.status);
-    console.error('Data:', (() => { try { return JSON.stringify(upstreamErrorBody, null, 2); } catch { return '[não serializável]'; } })());
-    console.error('Error code:', error.code);
-    console.error('Error message:', error.message);
-    console.error('Modelo usado:', nimModel);
-    console.error('==============================');
-
-    res.status(error.response?.status || 500).json({
-      error: {
-        message: error.response?.data?.message
-          || error.response?.data?.error?.message
-          || error.message,
-        type: 'invalid_request_error',
-        upstream: upstreamErrorBody,
-        model_used: nimModel
-      }
-    });
   }
+
+  // Se chegou aqui, TODOS os modelos da cadeia falharam
+  console.error('!!! Todos os modelos da cadeia de fallback falharam !!!');
+  res.status(lastError?.response?.status || 500).json({
+    error: {
+      message: lastUpstreamErrorBody?.message
+        || lastUpstreamErrorBody?.error?.message
+        || lastError?.message,
+      type: 'invalid_request_error',
+      upstream: lastUpstreamErrorBody,
+      tried_models: candidates
+    }
+  });
 });
 
 app.all('*', (req, res) => {
