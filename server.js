@@ -43,6 +43,33 @@ app.get('/v1/models', (req, res) => {
   });
 });
 
+// Rota de diagnóstico: teste mínimo e direto na NVIDIA, sem sanitização, sem fallback,
+// sem nada do proxy no meio. Acesse pelo navegador (inclusive do celular):
+// https://SEU-APP.onrender.com/debug-test?model=deepseek-ai/deepseek-v3.2
+app.get('/debug-test', async (req, res) => {
+  const model = req.query.model || 'deepseek-ai/deepseek-v3.2';
+  try {
+    const response = await axios.post(`${NIM_API_BASE}/chat/completions`, {
+      model,
+      messages: [{ role: 'user', content: 'oi' }],
+      max_tokens: 10
+    }, {
+      headers: { Authorization: `Bearer ${NIM_API_KEY}`, 'Content-Type': 'application/json' },
+      timeout: 30000
+    });
+    res.json({ ok: true, model, status: response.status, data: response.data });
+  } catch (error) {
+    res.json({
+      ok: false,
+      model,
+      status: error.response?.status ?? null,
+      code: error.code ?? null,
+      message: error.message,
+      upstream_data: typeof error.response?.data === 'object' ? error.response.data : String(error.response?.data ?? '')
+    });
+  }
+});
+
 // Remove mensagens vazias e funde roles consecutivos iguais (evita 400 em alguns modelos)
 function sanitizeMessages(messages) {
   const cleaned = messages
@@ -97,7 +124,6 @@ app.post('/v1/chat/completions', async (req, res) => {
   // tenta os próximos da lista, na ordem, antes de desistir.
   const FALLBACK_CHAIN = [
     'moonshotai/kimi-k2.6',
-    'deepseek-ai/deepseek-v4-pro',
     'deepseek-ai/deepseek-v3.2',
     'z-ai/glm-4.7'
   ];
@@ -110,6 +136,12 @@ app.post('/v1/chat/completions', async (req, res) => {
 
   for (let i = 0; i < candidates.length; i++) {
     const candidateModel = candidates[i];
+
+    // Pequena pausa entre tentativas (exceto a primeira) — evita rajada de requisições
+    // que pode piorar rate limiting ou parecer tráfego abusivo pra NVIDIA
+    if (i > 0) {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    }
 
     const nimRequest = {
       model: candidateModel,
