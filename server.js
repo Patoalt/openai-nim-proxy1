@@ -120,6 +120,19 @@ app.post('/v1/chat/completions', async (req, res) => {
     'moonshotai/kimi-k3': 0.95
   };
 
+  // Modelos que SEMPRE raciocinam internamente antes de responder (thinking obrigatório).
+  // O raciocínio consome do mesmo orçamento de max_tokens que a resposta final — se for
+  // baixo demais, o modelo é cortado no meio do "pensamento" e a resposta sai vazia (null).
+  // Por isso garantimos um mínimo generoso, mesmo que o cliente (Janitor) peça menos.
+  const MIN_MAX_TOKENS_OVERRIDES = {
+    'moonshotai/kimi-k3': 3000
+  };
+
+  // Timeout maior para modelos de raciocínio pesado, que legitimamente demoram mais
+  const TIMEOUT_OVERRIDES = {
+    'moonshotai/kimi-k3': 150000
+  };
+
   // Cadeia de fallback: se o modelo pedido falhar (429, 404, 410, 500, timeout...),
   // tenta os próximos da lista, na ordem, antes de desistir.
   const FALLBACK_CHAIN = [
@@ -143,14 +156,24 @@ app.post('/v1/chat/completions', async (req, res) => {
       await new Promise(resolve => setTimeout(resolve, 1500));
     }
 
+    const requestedMaxTokens = max_tokens ?? 2048;
+    const effectiveMaxTokens = Math.max(
+      requestedMaxTokens,
+      MIN_MAX_TOKENS_OVERRIDES[candidateModel] ?? 0
+    );
+
     const nimRequest = {
       model: candidateModel,
       messages,
       temperature: temperature ?? 0.7,
       top_p: TOP_P_OVERRIDES[candidateModel] ?? 0.9,
-      max_tokens: max_tokens ?? 2048,
+      max_tokens: effectiveMaxTokens,
       stream: stream || false
     };
+
+    if (effectiveMaxTokens !== requestedMaxTokens) {
+      console.log(`max_tokens ajustado de ${requestedMaxTokens} para ${effectiveMaxTokens} (mínimo exigido por ${candidateModel})`);
+    }
 
     if (THINKING_CAPABLE_MODELS.has(candidateModel)) {
       nimRequest.chat_template_kwargs = { thinking: true };
@@ -162,7 +185,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       const response = await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
         headers: { Authorization: `Bearer ${NIM_API_KEY}`, 'Content-Type': 'application/json' },
         responseType: stream ? 'stream' : 'json',
-        timeout: 90000
+        timeout: TIMEOUT_OVERRIDES[candidateModel] ?? 90000
       });
 
       if (candidateModel !== nimModel) {
